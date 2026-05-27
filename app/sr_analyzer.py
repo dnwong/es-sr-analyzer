@@ -14,6 +14,15 @@ import numpy as np
 import pandas as pd
 import requests
 
+# Custom JSON encoder — converts all numpy types to Python natives
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer): return int(obj)
+        if isinstance(obj, np.floating): return float(obj)
+        if isinstance(obj, np.bool_): return bool(obj)
+        if isinstance(obj, np.ndarray): return obj.tolist()
+        return super().default(obj)
+
 _orig = socket.getaddrinfo
 def _ipv4(host, port, family=0, *a, **kw):
     return _orig(host, port, socket.AF_INET, *a, **kw)
@@ -266,6 +275,14 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
     if plot_df.empty: plot_df = df.copy()
 
     times = plot_df.index.strftime("%H:%M").tolist()
+    opens  = [float(x) for x in plot_df["Open"].tolist()]
+    highs  = [float(x) for x in plot_df["High"].tolist()]
+    lows   = [float(x) for x in plot_df["Low"].tolist()]
+    closes = [float(x) for x in plot_df["Close"].tolist()]
+    vols   = [float(x) for x in plot_df["Volume"].tolist()]
+    vwap   = [float(x) for x in plot_df["VWAP"].tolist()]
+    vwap_u1= [float(x) for x in plot_df["VWAP_U1"].tolist()]
+    vwap_l1= [float(x) for x in plot_df["VWAP_L1"].tolist()]
 
     traces = []
 
@@ -273,10 +290,10 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
     traces.append({
         "type": "candlestick",
         "x": times,
-        "open":  plot_df["Open"].tolist(),
-        "high":  plot_df["High"].tolist(),
-        "low":   plot_df["Low"].tolist(),
-        "close": plot_df["Close"].tolist(),
+        "open":  opens,
+        "high":  highs,
+        "low":   lows,
+        "close": closes,
         "name": symbol,
         "increasing": {"line": {"color": "#26a69a"}, "fillcolor": "#26a69a"},
         "decreasing": {"line": {"color": "#ef5350"}, "fillcolor": "#ef5350"},
@@ -286,7 +303,7 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
     # VWAP
     traces.append({
         "type": "scatter", "mode": "lines",
-        "x": times, "y": plot_df["VWAP"].tolist(),
+        "x": times, "y": vwap,
         "name": "VWAP", "line": {"color": "#ff9800", "width": 1.5},
         "xaxis": "x", "yaxis": "y",
     })
@@ -295,7 +312,7 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
     traces.append({
         "type": "scatter", "mode": "lines",
         "x": times + times[::-1],
-        "y": plot_df["VWAP_U1"].tolist() + plot_df["VWAP_L1"].tolist()[::-1],
+        "y": vwap_u1 + vwap_l1[::-1],
         "fill": "toself", "fillcolor": "rgba(255,152,0,0.06)",
         "line": {"color": "transparent"}, "name": "VWAP ±1σ",
         "showlegend": True, "xaxis": "x", "yaxis": "y",
@@ -348,11 +365,11 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
         })
 
     # Volume bars (subplot)
-    vol_colors = ["#26a69a" if plot_df["Close"].iloc[i] >= plot_df["Open"].iloc[i]
-                  else "#ef5350" for i in range(len(plot_df))]
+    vol_colors = ["#26a69a" if closes[i] >= opens[i] else "#ef5350"
+                  for i in range(len(plot_df))]
     traces.append({
         "type": "bar",
-        "x": times, "y": plot_df["Volume"].tolist(),
+        "x": times, "y": vols,
         "name": "Volume",
         "marker": {"color": vol_colors, "opacity": 0.7},
         "xaxis": "x", "yaxis": "y2",
@@ -467,12 +484,12 @@ def main():
     }
 
     with open(args.json_out, "w") as f:
-        json.dump(results, f, default=lambda x: bool(x) if hasattr(x, 'item') else str(x))
+        json.dump(results, f, cls=NumpyEncoder)
 
     # Build interactive Plotly chart JSON
     chart = build_chart_json(df, scored, args.mode, pp, args.symbol, args.interval)
     with open(args.chart_out, "w") as f:
-        json.dump(chart, f, default=lambda x: float(x) if hasattr(x, 'item') else str(x))
+        json.dump(chart, f, cls=NumpyEncoder)
 
     print(f"Done. Results: {args.json_out}  Chart: {args.chart_out}")
 
