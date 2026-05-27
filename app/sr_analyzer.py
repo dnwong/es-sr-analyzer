@@ -460,19 +460,19 @@ def main():
                 "sources":     sorted(set(lvl.sources)),
                 "distance":    round(lvl.price-cur, 2),
                 "top5":        i < 5,
-                "is_pp":       pp is not None and abs(lvl.price-pp) <= args.tolerance,
+                "is_pp":       bool(pp is not None and abs(lvl.price-pp) <= args.tolerance),
             }
             for i,lvl in enumerate(scored)
         ],
     }
 
     with open(args.json_out, "w") as f:
-        json.dump(results, f)
+        json.dump(results, f, default=lambda x: bool(x) if hasattr(x, 'item') else str(x))
 
     # Build interactive Plotly chart JSON
     chart = build_chart_json(df, scored, args.mode, pp, args.symbol, args.interval)
     with open(args.chart_out, "w") as f:
-        json.dump(chart, f)
+        json.dump(chart, f, default=lambda x: float(x) if hasattr(x, 'item') else str(x))
 
     print(f"Done. Results: {args.json_out}  Chart: {args.chart_out}")
 
