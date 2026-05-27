@@ -12,14 +12,14 @@ services:
       - "3005:3000"
 
     environment:
-      # Must match the host-side port mapping above
-      - PORT=3005
+      # Internal container port — must match the right side of the ports mapping above
+      - PORT=3000
 
     restart: unless-stopped
 
     healthcheck:
-      # Portainer uses this to report container health status
-      test: ["CMD", "curl", "-f", "http://localhost:3005"]
+      # Healthcheck runs inside the container, so uses the internal port 3000
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s      # check every 30s
       timeout: 10s       # fail if no response within 10s
       retries: 3         # mark unhealthy after 3 consecutive failures
