@@ -1,7 +1,6 @@
 ﻿"""
 ES Futures Support & Resistance Analyzer
-Data source: Polygon.io (free API key at https://polygon.io)
-Futures symbols: ES, MES, NQ, MNQ, RTY, YM
+Data: Yahoo Finance direct HTTP (no yfinance library)
 """
 
 import argparse, json, os, tempfile, socket
@@ -16,23 +15,23 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
+# Force IPv4
 _orig = socket.getaddrinfo
 def _ipv4(host, port, family=0, *a, **kw):
     return _orig(host, port, socket.AF_INET, *a, **kw)
 socket.getaddrinfo = _ipv4
 
-POLY_BASE = "https://api.polygon.io"
-
-# Polygon futures ticker format: /ES (slash prefix)
 SYMBOL_MAP = {
-    "ES=F": "/ES", "MES=F": "/MES", "ES": "/ES", "MES": "/MES",
-    "NQ=F": "/NQ", "MNQ=F": "/MNQ", "NQ": "/NQ",  "MNQ": "/MNQ",
-    "RTY=F": "/RTY", "RTY": "/RTY",
-    "YM=F": "/YM",  "YM": "/YM",
+    "ES": "ES=F", "MES": "MES=F", "NQ": "NQ=F", "MNQ": "MNQ=F",
+    "RTY": "RTY=F", "YM": "YM=F",
 }
 
-MULTIPLIER_MAP = {"1m":"1","2m":"2","5m":"5","15m":"15","30m":"30","60m":"60"}
-TIMESPAN_MAP   = {"1m":"minute","2m":"minute","5m":"minute","15m":"minute","30m":"minute","60m":"minute"}
+INTERVAL_MAP = {"1m":"1m","2m":"2m","5m":"5m","15m":"15m","30m":"30m","60m":"60m"}
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
 
 
 @dataclass
@@ -44,66 +43,66 @@ class Level:
     kind: str = "neutral"
 
 
-def fetch_data(symbol: str, days_back: int, interval: str, api_key: str) -> pd.DataFrame:
-    ticker     = SYMBOL_MAP.get(symbol, f"/{symbol}")
-    multiplier = MULTIPLIER_MAP.get(interval, "5")
-    timespan   = TIMESPAN_MAP.get(interval, "minute")
+def fetch_data(symbol: str, days_back: int, interval: str, api_key: str = "") -> pd.DataFrame:
+    ticker = SYMBOL_MAP.get(symbol, symbol if symbol.endswith("=F") else symbol + "=F")
+    yf_interval = INTERVAL_MAP.get(interval, "5m")
 
-    end_dt   = datetime.now()
-    start_dt = end_dt - timedelta(days=days_back + 2)
-    from_str = start_dt.strftime("%Y-%m-%d")
-    to_str   = end_dt.strftime("%Y-%m-%d")
+    end_ts   = int(datetime.now().timestamp())
+    start_ts = int((datetime.now() - timedelta(days=days_back + 3)).timestamp())
 
-    # URL-encode the ticker so /ES becomes %2FES and does not break the path
-    from urllib.parse import quote
-    ticker_encoded = quote(ticker, safe="")
-    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker_encoded}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
-    params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+    params = {
+        "interval":  yf_interval,
+        "period1":   start_ts,
+        "period2":   end_ts,
+        "includePrePost": "false",
+    }
 
-    resp = requests.get(url, params=params, timeout=30)
+    session = requests.Session()
+    session.headers.update(HEADERS)
 
-    # Log raw response for debugging
-    raw = resp.text[:500]
-    print(f"[DEBUG] status={resp.status_code} url={url}", flush=True)
-    print(f"[DEBUG] raw={raw}", flush=True)
+    # Get a crumb first (Yahoo requires it for some requests)
+    try:
+        session.get("https://finance.yahoo.com", timeout=10)
+    except Exception:
+        pass
 
-    if resp.status_code == 403:
-        raise ValueError("Polygon API key invalid or unauthorized.")
-    if resp.status_code == 429:
-        raise ValueError("Polygon rate limit reached. Wait and retry.")
+    resp = session.get(url, params=params, timeout=30)
+    print(f"[DEBUG] status={resp.status_code} ticker={ticker} interval={yf_interval}", flush=True)
+
+    if resp.status_code != 200:
+        raise ValueError(f"Yahoo Finance returned {resp.status_code} for {ticker}. Try again during market hours.")
 
     try:
         data = resp.json()
-    except Exception as e:
-        raise ValueError(f"Polygon returned non-JSON response (status {resp.status_code}): {raw}")
+    except Exception:
+        raise ValueError(f"Yahoo Finance returned non-JSON: {resp.text[:200]}")
 
-    if data.get("status") == "ERROR":
-        raise ValueError(f"Polygon error: {data.get('error', data.get('message', str(data)))}")
-    if data.get("status") == "DELAYED" or data.get("status") == "OK":
-        pass  # valid
-    if not data.get("results"):
+    result = data.get("chart", {}).get("result")
+    error  = data.get("chart", {}).get("error")
+    if error:
+        raise ValueError(f"Yahoo Finance error: {error.get('description', str(error))}")
+    if not result or not result[0].get("timestamp"):
         raise ValueError(
-            f"No results for {ticker} [{from_str} to {to_str}]. "
-            f"Status: {data.get('status')} | "
-            f"Count: {data.get('resultsCount', 0)} | "
-            "Check symbol, date range, and that market was open."
+            f"No data for {ticker} [{yf_interval}]. "
+            "Markets may be closed or Yahoo has no intraday data for this symbol. "
+            "Try during market hours Mon-Fri 9:30am-5pm ET."
         )
 
-    rows = [
-        {
-            "Datetime": pd.to_datetime(r["t"], unit="ms", utc=True).tz_convert("America/New_York"),
-            "Open":   r["o"], "High":  r["h"],
-            "Low":    r["l"], "Close": r["c"],
-            "Volume": r.get("v", 0),
-        }
-        for r in data["results"]
-    ]
-    df = pd.DataFrame(rows).set_index("Datetime").sort_index()
-    cutoff = pd.Timestamp(datetime.now(timezone.utc) - timedelta(days=days_back)).tz_convert("America/New_York")
-    df = df[df.index >= cutoff]
-    if df.empty:
-        raise ValueError(f"No data in last {days_back} days for {ticker}.")
-    return df
+    r         = result[0]
+    timestamps = r["timestamp"]
+    ohlcv      = r["indicators"]["quote"][0]
+
+    df = pd.DataFrame({
+        "Open":   ohlcv.get("open",   [None]*len(timestamps)),
+        "High":   ohlcv.get("high",   [None]*len(timestamps)),
+        "Low":    ohlcv.get("low",    [None]*len(timestamps)),
+        "Close":  ohlcv.get("close",  [None]*len(timestamps)),
+        "Volume": ohlcv.get("volume", [0]*len(timestamps)),
+    }, index=pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("America/New_York"))
+    df.index.name = "Datetime"
+    df = df.dropna(subset=["Open","High","Low","Close"])
+    return df.sort_index()
 
 
 def prior_day_levels(df):
@@ -247,17 +246,12 @@ def main():
     p.add_argument("--or-minutes",  type=int,   default=30)
     p.add_argument("--pivot-order", type=int,   default=5)
     p.add_argument("--tolerance",   type=float, default=2.0)
-    p.add_argument("--api-key",     default=os.environ.get("POLYGON_API_KEY",""))
+    p.add_argument("--api-key",     default="")
     p.add_argument("--json-out",    default=os.path.join(tempfile.gettempdir(),"sr_results.json"))
     p.add_argument("--chart-out",   default=os.path.join(tempfile.gettempdir(),"es_sr_analysis.png"))
     args=p.parse_args()
 
-    if not args.api_key:
-        with open(args.json_out,"w") as f:
-            json.dump({"error":"No API key. Set POLYGON_API_KEY env var."},f)
-        return
-
-    df=fetch_data(args.symbol,args.days,args.interval,args.api_key)
+    df=fetch_data(args.symbol,args.days,args.interval)
     df=compute_vwap(df)
     raw={}
     raw.update(prior_day_levels(df))
@@ -277,5 +271,3 @@ def main():
 
 if __name__=="__main__":
     main()
-
-
