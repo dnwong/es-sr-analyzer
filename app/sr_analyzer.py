@@ -54,7 +54,10 @@ def fetch_data(symbol: str, days_back: int, interval: str, api_key: str) -> pd.D
     from_str = start_dt.strftime("%Y-%m-%d")
     to_str   = end_dt.strftime("%Y-%m-%d")
 
-    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
+    # URL-encode the ticker so /ES becomes %2FES and does not break the path
+    from urllib.parse import quote
+    ticker_encoded = quote(ticker, safe="")
+    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker_encoded}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
     params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
 
     resp = requests.get(url, params=params, timeout=30)
@@ -274,4 +277,5 @@ def main():
 
 if __name__=="__main__":
     main()
+
 
