@@ -1,16 +1,28 @@
 services:
   analyzer:
+    # Pre-built image from GitHub Container Registry (auto-built on every push to master)
+    # Falls back to building from local Dockerfile if the image can't be pulled
     image: ghcr.io/dnwong/es-sr-analyzer:latest
     build: .
+
     container_name: es-sr-analyzer
+
     ports:
-      - "3000:3000"
+      # Host port 3005 → container port 3000
+      # Changed from default 3000 to avoid conflicts on the host
+      # Update healthcheck below if you change this
+      - "3005:3000"
+
     environment:
-      - PORT=3000
+      # Must match the host-side port mapping above
+      - PORT=3005
+
     restart: unless-stopped
+
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+      # Portainer uses this to report container health status
+      test: ["CMD", "curl", "-f", "http://localhost:3005"]
+      interval: 30s      # check every 30s
+      timeout: 10s       # fail if no response within 10s
+      retries: 3         # mark unhealthy after 3 consecutive failures
+      start_period: 15s  # grace period on first start (Python deps take a moment)
