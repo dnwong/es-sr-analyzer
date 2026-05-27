@@ -6,10 +6,7 @@ services:
     container_name: es-sr-analyzer
 
     ports:
-      # Host port 3005 → container port 3000
-      # Changed from default 3000 to avoid conflicts on the host
-      # Update healthcheck below if you change this
-      - "3005:3000"
+      - "3000:3000"
 
     environment:
       # Internal container port — must match the right side of the ports mapping above
