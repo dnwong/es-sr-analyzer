@@ -18,13 +18,19 @@ const TIMEOUT_MS = 120_000; // 2 min max for data fetch + analysis
 app.get("/health", async (req, res) => {
   const { execSync } = require("child_process");
   let pyVersion = "unknown";
-  let netOk = false;
-  try { pyVersion = execSync("python3 --version").toString().trim(); } catch {}
-  try {
-    execSync("curl -sf --max-time 5 https://query2.finance.yahoo.com/v8/finance/chart/SPY");
-    netOk = true;
-  } catch {}
-  res.json({ status: "ok", pyVersion, yahooReachable: netOk });
+  let yahooReachable = false;
+  let dnsOk = false;
+  let httpsOk = false;
+  let diagnose = [];
+
+  try { pyVersion = execSync("python3 --version 2>&1").toString().trim(); } catch(e) { diagnose.push("python3 missing"); }
+  try { execSync("nslookup query2.finance.yahoo.com 8.8.8.8"); dnsOk = true; } catch { diagnose.push("DNS failed"); }
+  try { execSync("curl -sf --max-time 5 https://query2.finance.yahoo.com/v8/finance/chart/SPY"); yahooReachable = true; httpsOk = true; }
+  catch(e) { diagnose.push("curl yahoo failed: " + e.message); }
+  try { execSync("curl -sf --max-time 5 https://httpbin.org/get"); httpsOk = true; }
+  catch(e) { diagnose.push("curl httpbin failed: " + e.message); }
+
+  res.json({ status: "ok", pyVersion, yahooReachable, dnsOk, httpsOk, diagnose });
 });
 app.get("/chart", (req, res) => {
   if (fs.existsSync(CHART_PATH)) {
