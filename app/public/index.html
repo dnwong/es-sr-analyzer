@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ES Futures S/R Analyzer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #58a6ff;
+      margin-bottom: 24px;
+      letter-spacing: 0.02em;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 24px;
+      max-width: 1400px;
+    }
+
+    /* --- Controls panel --- */
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .panel h2 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8b949e;
+      margin-bottom: 16px;
+    }
+
+    .field { margin-bottom: 14px; }
+
+    label {
+      display: block;
+      font-size: 0.78rem;
+      color: #8b949e;
+      margin-bottom: 4px;
+    }
+
+    input, select {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 0.88rem;
+      padding: 7px 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: #58a6ff; }
+
+    .hint {
+      font-size: 0.7rem;
+      color: #484f58;
+      margin-top: 3px;
+    }
+
+    button#run {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px;
+      background: #238636;
+      border: 1px solid #2ea043;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button#run:hover  { background: #2ea043; }
+    button#run:active { background: #1a7f37; }
+    button#run:disabled { background: #21262d; color: #484f58; cursor: not-allowed; border-color: #30363d; }
+
+    /* --- Results area --- */
+    .results { display: flex; flex-direction: column; gap: 20px; }
+
+    .status {
+      font-size: 0.82rem;
+      color: #8b949e;
+      min-height: 20px;
+    }
+    .status.error { color: #f85149; }
+
+    /* Meta bar */
+    .meta {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .meta-item {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 10px 16px;
+    }
+    .meta-item .val {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e6edf3;
+    }
+    .meta-item .lbl {
+      font-size: 0.7rem;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+
+    /* Table */
+    .table-wrap {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.83rem;
+    }
+
+    thead th {
+      background: #1c2128;
+      color: #8b949e;
+      font-weight: 500;
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid #30363d;
+      white-space: nowrap;
+    }
+
+    tbody tr { border-bottom: 1px solid #21262d; transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1c2128; }
+    tbody tr.top5 { background: #161b22; }
+
+    td { padding: 9px 14px; white-space: nowrap; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .badge.resistance { background: #3d1a1a; color: #ef5350; }
+    .badge.support    { background: #0d2818; color: #26a69a; }
+
+    .score-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .bar-bg {
+      flex: 1;
+      height: 6px;
+      background: #21262d;
+      border-radius: 3px;
+      min-width: 60px;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: #58a6ff;
+    }
+    .bar-fill.top { background: #f0c040; }
+
+    .star { color: #f0c040; margin-right: 4px; }
+
+    .source-tag {
+      display: inline-block;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 0.68rem;
+      color: #8b949e;
+      margin: 1px;
+    }
+
+    .dist.up   { color: #ef5350; }
+    .dist.down { color: #26a69a; }
+
+    /* Chart */
+    .chart-wrap {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      overflow: hidden;
+      text-align: center;
+    }
+    .chart-wrap img {
+      width: 100%;
+      display: block;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 800px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>⚡ ES Futures S/R Analyzer</h1>
+
+  <div class="layout">
+    <!-- Controls -->
+    <div class="panel">
+      <h2>Parameters</h2>
+
+      <div class="field">
+        <label for="symbol">Symbol</label>
+        <input id="symbol" value="ES=F" />
+        <div class="hint">ES=F, NQ=F, MES=F, MNQ=F</div>
+      </div>
+
+      <div class="field">
+        <label for="interval">Bar Interval</label>
+        <select id="interval">
+          <option value="1m">1 minute</option>
+          <option value="2m">2 minutes</option>
+          <option value="5m" selected>5 minutes</option>
+          <option value="15m">15 minutes</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="days">History (days)</label>
+        <input id="days" type="number" min="1" max="10" value="3" />
+        <div class="hint">1–10 days</div>
+      </div>
+
+      <div class="field">
+        <label for="or_minutes">Opening Range (minutes)</label>
+        <input id="or_minutes" type="number" min="5" max="60" value="30" />
+        <div class="hint">First N minutes of RTH session</div>
+      </div>
+
+      <div class="field">
+        <label for="pivot_order">Pivot Order (bars)</label>
+        <input id="pivot_order" type="number" min="2" max="20" value="5" />
+        <div class="hint">Bars each side to confirm a swing</div>
+      </div>
+
+      <div class="field">
+        <label for="tolerance">Tolerance (points)</label>
+        <input id="tolerance" type="number" min="0.25" max="10" step="0.25" value="2.0" />
+        <div class="hint">Clustering &amp; touch detection window</div>
+      </div>
+
+      <button id="run" onclick="runAnalysis()">Run Analysis</button>
+    </div>
+
+    <!-- Results -->
+    <div class="results">
+      <div class="status" id="status">Configure parameters and click Run Analysis.</div>
+
+      <div id="meta" class="meta" style="display:none"></div>
+
+      <div id="table-wrap" class="table-wrap" style="display:none">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Price</th>
+              <th>Kind</th>
+              <th>Score</th>
+              <th>Touches</th>
+              <th>Distance</th>
+              <th>Sources</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div id="chart-wrap" class="chart-wrap" style="display:none">
+        <img id="chart-img" src="" alt="S/R Chart" />
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function runAnalysis() {
+      const btn = document.getElementById("run");
+      const status = document.getElementById("status");
+
+      btn.disabled = true;
+      status.className = "status";
+      status.innerHTML = '<span class="spinner"></span>Fetching data and computing levels…';
+      document.getElementById("meta").style.display = "none";
+      document.getElementById("table-wrap").style.display = "none";
+      document.getElementById("chart-wrap").style.display = "none";
+
+      const body = {
+        symbol:      document.getElementById("symbol").value.trim(),
+        interval:    document.getElementById("interval").value,
+        days:        document.getElementById("days").value,
+        or_minutes:  document.getElementById("or_minutes").value,
+        pivot_order: document.getElementById("pivot_order").value,
+        tolerance:   document.getElementById("tolerance").value,
+      };
+
+      try {
+        const res = await fetch("/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Unknown error");
+        renderResults(data);
+        status.textContent = `Done — ${data.levels.length} levels detected.`;
+      } catch (err) {
+        status.className = "status error";
+        status.textContent = "Error: " + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderResults(data) {
+      // Meta bar
+      const meta = document.getElementById("meta");
+      meta.innerHTML = `
+        <div class="meta-item"><div class="val">${data.symbol}</div><div class="lbl">Symbol</div></div>
+        <div class="meta-item"><div class="val">${data.current_price.toFixed(2)}</div><div class="lbl">Current Price</div></div>
+        <div class="meta-item"><div class="val">${data.interval}</div><div class="lbl">Interval</div></div>
+        <div class="meta-item"><div class="val">${new Date(data.generated_at).toLocaleTimeString()}</div><div class="lbl">Generated</div></div>
+      `;
+      meta.style.display = "flex";
+
+      // Table
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = "";
+      for (const lvl of data.levels) {
+        const isTop = lvl.top5;
+        const distSign = lvl.distance > 0 ? "▲" : "▼";
+        const distClass = lvl.distance > 0 ? "up" : "down";
+        const sources = lvl.sources.map(s => `<span class="source-tag">${s}</span>`).join("");
+        const barClass = isTop ? "bar-fill top" : "bar-fill";
+        const star = isTop ? '<span class="star">★</span>' : "";
+
+        tbody.innerHTML += `
+          <tr class="${isTop ? "top5" : ""}">
+            <td>${star}${lvl.rank}</td>
+            <td><strong>${lvl.price.toFixed(2)}</strong></td>
+            <td><span class="badge ${lvl.kind}">${lvl.kind}</span></td>
+            <td>
+              <div class="score-bar">
+                <span>${lvl.score}</span>
+                <div class="bar-bg"><div class="${barClass}" style="width:${lvl.score * 10}%"></div></div>
+              </div>
+            </td>
+            <td>${lvl.touches}</td>
+            <td class="dist ${distClass}">${distSign}${Math.abs(lvl.distance).toFixed(2)}</td>
+            <td>${sources}</td>
+          </tr>`;
+      }
+      document.getElementById("table-wrap").style.display = "block";
+
+      // Chart — cache-bust with timestamp
+      const img = document.getElementById("chart-img");
+      img.src = "/chart?" + Date.now();
+      img.onload = () => { document.getElementById("chart-wrap").style.display = "block"; };
+    }
+  </script>
+</body>
+</html>
