@@ -1,6 +1,9 @@
 ﻿"""
-ES Futures Support & Resistance Analyzer
-Data: Yahoo Finance direct HTTP (no yfinance library)
+ES Futures S/R Analyzer
+Two scoring modes:
+  --mode standard  : confluence + touches + HVN (original)
+  --mode floor     : floor trader approach (Shaoul-style) 
+                     higher-timeframe swings, volume zones, intraday rejection zones
 """
 
 import argparse, json, os, tempfile, socket
@@ -15,22 +18,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
-# Force IPv4
 _orig = socket.getaddrinfo
 def _ipv4(host, port, family=0, *a, **kw):
     return _orig(host, port, socket.AF_INET, *a, **kw)
 socket.getaddrinfo = _ipv4
 
 SYMBOL_MAP = {
-    "ES": "ES=F", "MES": "MES=F", "NQ": "NQ=F", "MNQ": "MNQ=F",
-    "RTY": "RTY=F", "YM": "YM=F",
+    "ES":"ES=F","MES":"MES=F","NQ":"NQ=F","MNQ":"MNQ=F","RTY":"RTY=F","YM":"YM=F",
 }
-
 INTERVAL_MAP = {"1m":"1m","2m":"2m","5m":"5m","15m":"15m","30m":"30m","60m":"60m"}
-
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json",
+    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept":"application/json",
 }
 
 
@@ -41,69 +40,44 @@ class Level:
     touches: int = 0
     score: float = 0.0
     kind: str = "neutral"
+    zone_low: float = 0.0
+    zone_high: float = 0.0
 
 
-def fetch_data(symbol: str, days_back: int, interval: str, api_key: str = "") -> pd.DataFrame:
-    ticker = SYMBOL_MAP.get(symbol, symbol if symbol.endswith("=F") else symbol + "=F")
-    yf_interval = INTERVAL_MAP.get(interval, "5m")
+#  Data 
 
-    end_ts   = int(datetime.now().timestamp())
-    start_ts = int((datetime.now() - timedelta(days=days_back + 3)).timestamp())
-
+def fetch_data(symbol, days_back, interval):
+    ticker = SYMBOL_MAP.get(symbol, symbol if symbol.endswith("=F") else symbol+"=F")
+    yf_int = INTERVAL_MAP.get(interval, "5m")
+    end_ts = int(datetime.now().timestamp())
+    start_ts = int((datetime.now()-timedelta(days=days_back+3)).timestamp())
     url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
-    params = {
-        "interval":  yf_interval,
-        "period1":   start_ts,
-        "period2":   end_ts,
-        "includePrePost": "false",
-    }
-
-    session = requests.Session()
-    session.headers.update(HEADERS)
-
-    # Get a crumb first (Yahoo requires it for some requests)
-    try:
-        session.get("https://finance.yahoo.com", timeout=10)
-    except Exception:
-        pass
-
-    resp = session.get(url, params=params, timeout=30)
-    print(f"[DEBUG] status={resp.status_code} ticker={ticker} interval={yf_interval}", flush=True)
-
+    params = {"interval":yf_int,"period1":start_ts,"period2":end_ts,"includePrePost":"false"}
+    s = requests.Session(); s.headers.update(HEADERS)
+    try: s.get("https://finance.yahoo.com", timeout=10)
+    except: pass
+    resp = s.get(url, params=params, timeout=30)
+    print(f"[DEBUG] status={resp.status_code} ticker={ticker}", flush=True)
     if resp.status_code != 200:
-        raise ValueError(f"Yahoo Finance returned {resp.status_code} for {ticker}. Try again during market hours.")
-
-    try:
-        data = resp.json()
-    except Exception:
-        raise ValueError(f"Yahoo Finance returned non-JSON: {resp.text[:200]}")
-
-    result = data.get("chart", {}).get("result")
-    error  = data.get("chart", {}).get("error")
-    if error:
-        raise ValueError(f"Yahoo Finance error: {error.get('description', str(error))}")
+        raise ValueError(f"Yahoo returned {resp.status_code} for {ticker}.")
+    try: data = resp.json()
+    except: raise ValueError(f"Yahoo non-JSON: {resp.text[:200]}")
+    result = data.get("chart",{}).get("result")
+    err    = data.get("chart",{}).get("error")
+    if err: raise ValueError(f"Yahoo error: {err.get('description',str(err))}")
     if not result or not result[0].get("timestamp"):
-        raise ValueError(
-            f"No data for {ticker} [{yf_interval}]. "
-            "Markets may be closed or Yahoo has no intraday data for this symbol. "
-            "Try during market hours Mon-Fri 9:30am-5pm ET."
-        )
-
-    r         = result[0]
-    timestamps = r["timestamp"]
-    ohlcv      = r["indicators"]["quote"][0]
-
+        raise ValueError(f"No data for {ticker}. Try during market hours Mon-Fri 9:30am-5pm ET.")
+    r = result[0]; ts = r["timestamp"]; q = r["indicators"]["quote"][0]
     df = pd.DataFrame({
-        "Open":   ohlcv.get("open",   [None]*len(timestamps)),
-        "High":   ohlcv.get("high",   [None]*len(timestamps)),
-        "Low":    ohlcv.get("low",    [None]*len(timestamps)),
-        "Close":  ohlcv.get("close",  [None]*len(timestamps)),
-        "Volume": ohlcv.get("volume", [0]*len(timestamps)),
-    }, index=pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("America/New_York"))
+        "Open":q.get("open",[None]*len(ts)),"High":q.get("high",[None]*len(ts)),
+        "Low":q.get("low",[None]*len(ts)),"Close":q.get("close",[None]*len(ts)),
+        "Volume":q.get("volume",[0]*len(ts)),
+    }, index=pd.to_datetime(ts,unit="s",utc=True).tz_convert("America/New_York"))
     df.index.name = "Datetime"
-    df = df.dropna(subset=["Open","High","Low","Close"])
-    return df.sort_index()
+    return df.dropna(subset=["Open","High","Low","Close"]).sort_index()
 
+
+#  Shared level builders 
 
 def prior_day_levels(df):
     daily = df.resample("D").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
@@ -111,53 +85,46 @@ def prior_day_levels(df):
     p = daily.iloc[-2]
     return {"PDH":float(p["High"]),"PDL":float(p["Low"]),"PDC":float(p["Close"])}
 
-
 def opening_range(df, minutes=30):
     today = df.index[-1].date()
-    s = pd.Timestamp(datetime.combine(today, dtime(9,30)), tz=df.index.tz)
-    bars = df[(df.index >= s) & (df.index < s + timedelta(minutes=minutes))]
+    s = pd.Timestamp(datetime.combine(today,dtime(9,30)),tz=df.index.tz)
+    bars = df[(df.index>=s)&(df.index<s+timedelta(minutes=minutes))]
     if bars.empty: return {}
     return {"ORH":float(bars["High"].max()),"ORL":float(bars["Low"].min()),
             "OR_MID":float((bars["High"].max()+bars["Low"].min())/2)}
 
-
 def compute_vwap(df):
-    df = df.copy()
-    df["date"]    = df.index.date
-    df["typical"] = (df["High"]+df["Low"]+df["Close"])/3
-    df["tp_vol"]  = df["typical"]*df["Volume"]
-    df["cum_tp"]  = df.groupby("date")["tp_vol"].cumsum()
-    df["cum_vol"] = df.groupby("date")["Volume"].cumsum()
-    df["VWAP"]    = df["cum_tp"]/df["cum_vol"]
-    df["sq"]      = (df["typical"]-df["VWAP"])**2
-    df["cum_sq"]  = df.groupby("date")["sq"].cumsum()
-    df["std"]     = np.sqrt(df["cum_sq"]/df.groupby("date").cumcount().add(1))
-    df["VWAP_U1"] = df["VWAP"]+df["std"];   df["VWAP_L1"] = df["VWAP"]-df["std"]
-    df["VWAP_U2"] = df["VWAP"]+2*df["std"]; df["VWAP_L2"] = df["VWAP"]-2*df["std"]
+    df=df.copy(); df["date"]=df.index.date
+    df["typical"]=(df["High"]+df["Low"]+df["Close"])/3
+    df["tp_vol"]=df["typical"]*df["Volume"]
+    df["cum_tp"]=df.groupby("date")["tp_vol"].cumsum()
+    df["cum_vol"]=df.groupby("date")["Volume"].cumsum()
+    df["VWAP"]=df["cum_tp"]/df["cum_vol"]
+    df["sq"]=(df["typical"]-df["VWAP"])**2
+    df["cum_sq"]=df.groupby("date")["sq"].cumsum()
+    df["std"]=np.sqrt(df["cum_sq"]/df.groupby("date").cumcount().add(1))
+    df["VWAP_U1"]=df["VWAP"]+df["std"];   df["VWAP_L1"]=df["VWAP"]-df["std"]
+    df["VWAP_U2"]=df["VWAP"]+2*df["std"]; df["VWAP_L2"]=df["VWAP"]-2*df["std"]
     return df
 
-
 def swing_levels(df, order=5):
-    h,l,n = df["High"].values,df["Low"].values,len(df)
-    sh = [i for i in range(order,n-order) if h[i]==max(h[i-order:i+order+1])]
-    sl = [i for i in range(order,n-order) if l[i]==min(l[i-order:i+order+1])]
+    h,l,n=df["High"].values,df["Low"].values,len(df)
+    sh=[i for i in range(order,n-order) if h[i]==max(h[i-order:i+order+1])]
+    sl=[i for i in range(order,n-order) if l[i]==min(l[i-order:i+order+1])]
     return {"swing_highs":sorted(set(h[sh]),reverse=True)[:8],
             "swing_lows":sorted(set(l[sl]))[:8]}
 
-
 def volume_clusters(df, bins=60, top_n=5):
-    pr = np.linspace(df["Low"].min(),df["High"].max(),bins+1)
-    vp = np.zeros(bins)
+    pr=np.linspace(df["Low"].min(),df["High"].max(),bins+1); vp=np.zeros(bins)
     for _,row in df.iterrows():
         for i in range(bins):
-            ol,oh = max(row["Low"],pr[i]),min(row["High"],pr[i+1])
-            if oh>ol: vp[i] += row["Volume"]*(oh-ol)/max(pr[i+1]-pr[i],1e-9)
-    c = (pr[:-1]+pr[1:])/2
+            ol,oh=max(row["Low"],pr[i]),min(row["High"],pr[i+1])
+            if oh>ol: vp[i]+=row["Volume"]*(oh-ol)/max(pr[i+1]-pr[i],1e-9)
+    c=(pr[:-1]+pr[1:])/2
     return sorted([float(c[i]) for i in np.argsort(vp)[-top_n:][::-1]])
 
-
 def count_touches(price, df, tol=2.0, recent=30):
-    tot,rec,n = 0,0,len(df)
+    tot,rec,n=0,0,len(df)
     for i,(_,row) in enumerate(df.iterrows()):
         if row["Low"]<=price+tol and row["High"]>=price-tol:
             if abs(row["Close"]-price)>tol*0.5:
@@ -166,8 +133,10 @@ def count_touches(price, df, tol=2.0, recent=30):
     return tot,rec
 
 
-def score_levels(raw, df, hvn, tol=2.0):
-    cands = {}
+#  MODE 1: Standard scoring 
+
+def score_standard(raw, df, hvn, tol=2.0):
+    cands={}
     for tag in ["PDH","PDL","PDC","ORH","ORL","OR_MID"]:
         if raw.get(tag): cands.setdefault(raw[tag],[]).append(tag)
     for p in raw.get("swing_highs",[]): cands.setdefault(p,[]).append("SwingR")
@@ -175,14 +144,13 @@ def score_levels(raw, df, hvn, tol=2.0):
     clusters=[]
     for price in sorted(cands):
         if clusters and abs(price-clusters[-1][0])<=tol:
-            clusters[-1]=((clusters[-1][0]+price)/2, clusters[-1][1]+cands[price])
+            clusters[-1]=((clusters[-1][0]+price)/2,clusters[-1][1]+cands[price])
         else: clusters.append((price,cands[price]))
-    cur = float(df["Close"].iloc[-1])
-    levels=[]
+    cur=float(df["Close"].iloc[-1]); levels=[]
     for price,sources in clusters:
-        lvl=Level(price=price,sources=sources)
-        lvl.score += 1+(len(set(sources))-1)*2
-        tot,rec = count_touches(price,df,tol)
+        lvl=Level(price=price,sources=sources,zone_low=price-tol,zone_high=price+tol)
+        lvl.score+=1+(len(set(sources))-1)*2
+        tot,rec=count_touches(price,df,tol)
         lvl.touches=tot; lvl.score+=tot+rec
         for h in hvn:
             if abs(h-price)<=tol*1.5:
@@ -196,7 +164,162 @@ def score_levels(raw, df, hvn, tol=2.0):
     return sorted(levels,key=lambda l:l.score,reverse=True)
 
 
-def render_chart(df, scored, chart_out):
+#  MODE 2: Floor trader / Shaoul-style scoring 
+#
+# Priority order (highest to lowest):
+#   1. Multi-timeframe swing highs/lows visible on daily/weekly (sharp reversals)
+#   2. High-volume nodes (POC / HVN)  price memory zones
+#   3. Prior day H/L/C  primary reference for pit traders
+#   4. Intraday rejection zones  bars with heavy volume but little progress (stalls)
+#   5. Low-volume nodes  air pockets, price moves fast through these
+#   6. Opening range extremes
+#   7. Repeated intraday touches (zone credibility)
+#
+# Levels are treated as ZONES (tol wide), not lines.
+# A level gains credibility with each test that holds.
+
+def sharp_reversal_swings(df, order=8, min_move_pct=0.003):
+    """
+    Swing highs/lows that produced sharp reversals  the kind visible on daily/weekly.
+    Filters for pivots where the subsequent move was significant (min_move_pct of price).
+    """
+    h,l,n=df["High"].values,df["Low"].values,len(df)
+    c=df["Close"].values
+    result_highs,result_lows=[],[]
+    for i in range(order,n-order):
+        if h[i]==max(h[i-order:i+order+1]):
+            # measure reversal: how far did price drop after this high
+            subsequent_low=min(l[i:min(i+order*3,n)])
+            if (h[i]-subsequent_low)/h[i] >= min_move_pct:
+                result_highs.append(h[i])
+        if l[i]==min(l[i-order:i+order+1]):
+            subsequent_high=max(h[i:min(i+order*3,n)])
+            if (subsequent_high-l[i])/l[i] >= min_move_pct:
+                result_lows.append(l[i])
+    return {"sharp_highs":sorted(set(result_highs),reverse=True)[:6],
+            "sharp_lows":sorted(set(result_lows))[:6]}
+
+def low_volume_nodes(df, bins=60, bottom_n=3):
+    """
+    Low-volume nodes  air pockets where price tends to move quickly.
+    These are NOT support/resistance but mark fast-move zones.
+    """
+    pr=np.linspace(df["Low"].min(),df["High"].max(),bins+1); vp=np.zeros(bins)
+    for _,row in df.iterrows():
+        for i in range(bins):
+            ol,oh=max(row["Low"],pr[i]),min(row["High"],pr[i+1])
+            if oh>ol: vp[i]+=row["Volume"]*(oh-ol)/max(pr[i+1]-pr[i],1e-9)
+    # Only consider nodes in the middle 80% of range (exclude extremes)
+    trim=int(bins*0.1)
+    mid_vp=vp[trim:-trim]; mid_c=(pr[:-1]+pr[1:])[trim:-trim]/1  # centers
+    c=(pr[:-1]+pr[1:])/2
+    bottom_idx=np.argsort(vp[trim:-trim])[:bottom_n]
+    return [float(c[trim+i]) for i in bottom_idx]
+
+def intraday_rejection_zones(df, vol_percentile=75, tol=2.0):
+    """
+    Bars with high volume but small body (stall/rejection)  order flow stalling.
+    These are intraday zones where price repeatedly struggled.
+    """
+    today=df.index[-1].date()
+    today_df=df[df.index.date==today].copy()
+    if today_df.empty: return []
+    vol_thresh=np.percentile(today_df["Volume"].replace(0,np.nan).dropna(), vol_percentile)
+    zones=[]
+    for _,row in today_df.iterrows():
+        body=abs(row["Close"]-row["Open"])
+        rng=row["High"]-row["Low"]
+        # High volume, small body relative to range = stall/rejection
+        if row["Volume"]>=vol_thresh and rng>0 and body/rng<0.35:
+            mid=(row["High"]+row["Low"])/2
+            zones.append(round(float(mid),2))
+    # Cluster nearby zones
+    if not zones: return []
+    zones=sorted(set(zones)); merged=[zones[0]]
+    for z in zones[1:]:
+        if z-merged[-1]<=tol: merged[-1]=(merged[-1]+z)/2
+        else: merged.append(z)
+    return [round(z,2) for z in merged]
+
+def score_floor(raw, df, hvn, tol=2.0):
+    """
+    Floor trader scoring  weights levels by their structural significance,
+    not just count. Zones, not lines.
+    """
+    cands={}
+
+    # Tier 1: Sharp multi-timeframe swings (most significant)
+    for p in raw.get("sharp_highs",[]): cands.setdefault(p,[]).append("SharpR")
+    for p in raw.get("sharp_lows",[]): cands.setdefault(p,[]).append("SharpS")
+
+    # Tier 2: Prior day structure
+    for tag in ["PDH","PDL","PDC"]:
+        if raw.get(tag): cands.setdefault(raw[tag],[]).append(tag)
+
+    # Tier 3: Opening range
+    for tag in ["ORH","ORL","OR_MID"]:
+        if raw.get(tag): cands.setdefault(raw[tag],[]).append(tag)
+
+    # Tier 4: Intraday rejection zones
+    for p in raw.get("rejection_zones",[]): cands.setdefault(p,[]).append("Rejection")
+
+    # Tier 5: Regular swings
+    for p in raw.get("swing_highs",[]): cands.setdefault(p,[]).append("SwingR")
+    for p in raw.get("swing_lows",[]): cands.setdefault(p,[]).append("SwingS")
+
+    clusters=[]
+    for price in sorted(cands):
+        if clusters and abs(price-clusters[-1][0])<=tol:
+            clusters[-1]=((clusters[-1][0]+price)/2,clusters[-1][1]+cands[price])
+        else: clusters.append((price,cands[price]))
+
+    cur=float(df["Close"].iloc[-1]); levels=[]
+    lvn_list=raw.get("lvn",[])
+
+    for price,sources in clusters:
+        src=set(sources)
+        lvl=Level(price=price,sources=sources,zone_low=round(price-tol,2),zone_high=round(price+tol,2))
+
+        # Tier weights
+        if src&{"SharpR","SharpS"}:  lvl.score+=5   # sharp reversal = highest weight
+        if src&{"PDH","PDL","PDC"}:  lvl.score+=4   # prior day structure
+        if src&{"ORH","ORL"}:        lvl.score+=3   # opening range
+        if src&{"Rejection"}:        lvl.score+=3   # intraday stall
+        if src&{"SwingR","SwingS"}:  lvl.score+=2   # regular swing
+
+        # Confluence multiplier  more methods = more significant
+        lvl.score += (len(src)-1)*2
+
+        # HVN: price memory  strong zone
+        for h in hvn:
+            if abs(h-price)<=tol*1.5:
+                lvl.score+=4
+                if "HVN" not in lvl.sources: lvl.sources.append("HVN")
+                break
+
+        # LVN nearby: air pocket  reduces significance as S/R
+        for lv in lvn_list:
+            if abs(lv-price)<=tol*1.5:
+                lvl.score=max(0,lvl.score-2)
+                if "LVN" not in lvl.sources: lvl.sources.append("LVN")
+                break
+
+        # Touch credibility  each test that held adds weight
+        tot,rec=count_touches(price,df,tol)
+        lvl.touches=tot
+        lvl.score+=tot*1.5+rec*1.0   # floor approach weights touches heavily
+
+        lvl.kind="resistance" if price>cur else "support"
+        levels.append(lvl)
+
+    mx=max((l.score for l in levels),default=1)
+    for lvl in levels: lvl.score=round((lvl.score/mx)*10,1)
+    return sorted(levels,key=lambda l:l.score,reverse=True)
+
+
+#  Chart 
+
+def render_chart(df, scored, chart_out, mode="standard"):
     today=df.index[-1].date()
     plot_df=df[df.index.date==today].copy()
     if plot_df.empty: plot_df=df.copy()
@@ -215,21 +338,30 @@ def render_chart(df, scored, chart_out):
     ax.plot(x,plot_df["VWAP"],color="#ff9800",linewidth=1.5,label="VWAP",zorder=3)
     ax.fill_between(x,plot_df["VWAP_L1"],plot_df["VWAP_U1"],alpha=0.08,color="#ff9800")
     ax.fill_between(x,plot_df["VWAP_L2"],plot_df["VWAP_U2"],alpha=0.04,color="#ff9800")
+
+    # All levels dim
     for lvl in scored:
         c="#ef5350" if lvl.kind=="resistance" else "#26a69a"
-        ax.axhline(lvl.price,color=c,linestyle="--",linewidth=0.5,alpha=0.3)
+        ax.axhline(lvl.price,color=c,linestyle="--",linewidth=0.5,alpha=0.25)
+
+    # Top 5  floor mode draws zones, standard draws lines
     for lvl in scored[:5]:
         c="#ef5350" if lvl.kind=="resistance" else "#26a69a"
-        ax.axhline(lvl.price,color=c,linestyle="-",linewidth=2.0,alpha=0.95,
-                   label=f"* {lvl.price:.2f} score:{lvl.score} [{','.join(set(lvl.sources))}]",zorder=4)
-        ax.annotate(f" {lvl.price:.2f}*",xy=(len(plot_df)-1,lvl.price),fontsize=7,color=c,
-                    va="bottom" if lvl.kind=="resistance" else "top")
+        if mode=="floor" and lvl.zone_high>lvl.zone_low:
+            ax.axhspan(lvl.zone_low,lvl.zone_high,alpha=0.15,color=c,zorder=3)
+        ax.axhline(lvl.price,color=c,linestyle="-",linewidth=2.0,alpha=0.9,
+                   label=f"* {lvl.price:.2f} [{','.join(set(lvl.sources))}] score:{lvl.score}",zorder=4)
+        ax.annotate(f" {lvl.price:.2f}*",xy=(len(plot_df)-1,lvl.price),
+                    fontsize=7,color=c,va="bottom" if lvl.kind=="resistance" else "top")
+
     vc=["#26a69a" if plot_df["Close"].iloc[i]>=plot_df["Open"].iloc[i] else "#ef5350" for i in range(len(plot_df))]
     av.bar(x,plot_df["Volume"],color=vc,alpha=0.7)
     av.set_ylabel("Volume",fontsize=8,color="#aaaaaa")
     ts=max(1,len(plot_df)//12); tks=list(range(0,len(plot_df),ts))
     ax.set_xticks(tks)
     ax.set_xticklabels([plot_df.index[i].strftime("%H:%M") for i in tks],fontsize=7,color="#aaaaaa")
+    mode_label="Floor Trader (Shaoul)" if mode=="floor" else "Standard"
+    ax.set_title(f"S/R Analysis  {mode_label} mode",fontsize=10,color="#cccccc",pad=6)
     ax.set_ylabel("Price",fontsize=9,color="#aaaaaa"); ax.tick_params(axis="y",colors="#aaaaaa")
     ax.legend(loc="upper left",fontsize=7,framealpha=0.4,facecolor="#1e222d",labelcolor="white")
     ax.grid(True,alpha=0.1,color="#333333"); av.grid(True,alpha=0.08,color="#333333")
@@ -237,6 +369,8 @@ def render_chart(df, scored, chart_out):
     plt.savefig(chart_out,dpi=150,bbox_inches="tight",facecolor="#131722")
     plt.close()
 
+
+#  Main 
 
 def main():
     p=argparse.ArgumentParser()
@@ -246,6 +380,8 @@ def main():
     p.add_argument("--or-minutes",  type=int,   default=30)
     p.add_argument("--pivot-order", type=int,   default=5)
     p.add_argument("--tolerance",   type=float, default=2.0)
+    p.add_argument("--mode",        default="standard", choices=["standard","floor"],
+                   help="standard=original scoring | floor=Shaoul floor-trader approach")
     p.add_argument("--api-key",     default="")
     p.add_argument("--json-out",    default=os.path.join(tempfile.gettempdir(),"sr_results.json"))
     p.add_argument("--chart-out",   default=os.path.join(tempfile.gettempdir(),"es_sr_analysis.png"))
@@ -253,21 +389,33 @@ def main():
 
     df=fetch_data(args.symbol,args.days,args.interval)
     df=compute_vwap(df)
+
     raw={}
     raw.update(prior_day_levels(df))
     raw.update(opening_range(df,minutes=args.or_minutes))
     raw.update(swing_levels(df,order=args.pivot_order))
     hvn=volume_clusters(df,top_n=5)
-    scored=score_levels(raw,df,hvn,tol=args.tolerance)
+
+    if args.mode=="floor":
+        raw.update(sharp_reversal_swings(df,order=args.pivot_order))
+        raw["rejection_zones"]=intraday_rejection_zones(df,tol=args.tolerance)
+        raw["lvn"]=low_volume_nodes(df)
+        scored=score_floor(raw,df,hvn,tol=args.tolerance)
+    else:
+        scored=score_standard(raw,df,hvn,tol=args.tolerance)
+
     cur=float(df["Close"].iloc[-1])
-    results={"symbol":args.symbol,"interval":args.interval,"current_price":cur,
-             "generated_at":datetime.now(timezone.utc).isoformat(),
-             "levels":[{"rank":i+1,"price":lvl.price,"kind":lvl.kind,"score":lvl.score,
-                        "touches":lvl.touches,"sources":sorted(set(lvl.sources)),
-                        "distance":round(lvl.price-cur,2),"top5":i<5}
-                       for i,lvl in enumerate(scored)]}
+    results={
+        "symbol":args.symbol,"interval":args.interval,"mode":args.mode,
+        "current_price":cur,"generated_at":datetime.now(timezone.utc).isoformat(),
+        "levels":[{"rank":i+1,"price":lvl.price,"kind":lvl.kind,"score":lvl.score,
+                   "touches":lvl.touches,"sources":sorted(set(lvl.sources)),
+                   "distance":round(lvl.price-cur,2),"top5":i<5,
+                   "zone_low":lvl.zone_low,"zone_high":lvl.zone_high}
+                  for i,lvl in enumerate(scored)],
+    }
     with open(args.json_out,"w") as f: json.dump(results,f)
-    render_chart(df,scored,args.chart_out)
+    render_chart(df,scored,args.chart_out,mode=args.mode)
 
 if __name__=="__main__":
     main()

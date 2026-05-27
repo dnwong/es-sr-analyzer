@@ -239,6 +239,15 @@
       <h2>Parameters</h2>
 
       <div class="field">
+        <label for="mode">Scoring Mode</label>
+        <select id="mode">
+          <option value="standard">Standard (confluence + touches)</option>
+          <option value="floor">Floor-Trader S/R (Shaoul-style)</option>
+        </select>
+        <div class="hint">Floor mode: zones, sharp reversals, POC/HVN, credibility rating</div>
+      </div>
+
+      <div class="field">
         <label for="symbol">Symbol</label>
         <input id="symbol" value="ES" />
         <div class="hint">ES · MES · NQ · MNQ · RTY · YM</div>
@@ -293,9 +302,11 @@
             <tr>
               <th>#</th>
               <th>Price</th>
+              <th>Zone</th>
               <th>Kind</th>
               <th>Score</th>
               <th>Touches</th>
+              <th>Credibility</th>
               <th>Distance</th>
               <th>Sources</th>
             </tr>
@@ -329,6 +340,7 @@
         or_minutes:  document.getElementById("or_minutes").value,
         pivot_order: document.getElementById("pivot_order").value,
         tolerance:   document.getElementById("tolerance").value,
+        mode:        document.getElementById("mode").value,
       };
 
       try {
@@ -371,10 +383,17 @@
         const barClass = isTop ? "bar-fill top" : "bar-fill";
         const star = isTop ? '<span class="star">★</span>' : "";
 
+        const credColor = {"strong":"#26a69a","moderate":"#ff9800","weak":"#8b949e"};
+        const credBadge = lvl.credibility
+          ? `<span style="color:${credColor[lvl.credibility]||'#8b949e'};font-size:0.75rem">${lvl.credibility}</span>`
+          : "—";
+        const zone = lvl.zone_low ? `${lvl.zone_low}–${lvl.zone_high}` : "—";
+
         tbody.innerHTML += `
           <tr class="${isTop ? "top5" : ""}">
             <td>${star}${lvl.rank}</td>
             <td><strong>${lvl.price.toFixed(2)}</strong></td>
+            <td style="font-size:0.75rem;color:#8b949e">${zone}</td>
             <td><span class="badge ${lvl.kind}">${lvl.kind}</span></td>
             <td>
               <div class="score-bar">
@@ -383,6 +402,7 @@
               </div>
             </td>
             <td>${lvl.touches}</td>
+            <td>${credBadge}</td>
             <td class="dist ${distClass}">${distSign}${Math.abs(lvl.distance).toFixed(2)}</td>
             <td>${sources}</td>
           </tr>`;

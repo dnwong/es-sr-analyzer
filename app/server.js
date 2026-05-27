@@ -44,12 +44,13 @@ app.get("/chart", (req, res) => {
 // Run the analyzer
 app.post("/analyze", (req, res) => {
   const {
-    symbol      = "MES=F",
+    symbol      = "ES",
     interval    = "5m",
     days        = "3",
     or_minutes  = "30",
     pivot_order = "5",
     tolerance   = "2.0",
+    mode        = "standard",
   } = req.body;
 
   // Input validation
@@ -67,6 +68,7 @@ app.post("/analyze", (req, res) => {
     "--or-minutes",  String(or_minutes),
     "--pivot-order", String(pivot_order),
     "--tolerance",   String(tolerance),
+    "--mode",        mode,
     "--json-out",    JSON_PATH,
     "--chart-out",   CHART_PATH,
     "--api-key",     "",
