@@ -11,7 +11,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const os = require("os");
 const CHART_PATH = path.join(os.tmpdir(), "es_sr_analysis.png");
 const JSON_PATH  = path.join(os.tmpdir(), "sr_results.json");
-const PY_SCRIPT  = "/app/sr_analyzer.py";
+const PY_SCRIPT  = path.join(__dirname, "sr_analyzer.py");
 const TIMEOUT_MS = 120_000; // 2 min max for data fetch + analysis
 
 // Serve chart image
