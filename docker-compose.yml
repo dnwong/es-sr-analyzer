@@ -1,7 +1,6 @@
 services:
   analyzer:
-    build: .
-    image: es-sr-analyzer:latest
+    image: ghcr.io/${GITHUB_REPOSITORY:-your-username/es-sr-analyzer}:latest
     container_name: es-sr-analyzer
     ports:
       - "3000:3000"
@@ -14,6 +13,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
-    labels:
-      - "com.docker.compose.project=es-sr-analyzer"
-      - "traefik.enable=false"
