@@ -69,7 +69,7 @@ app.post("/analyze", (req, res) => {
     "--tolerance",   String(tolerance),
     "--json-out",    JSON_PATH,
     "--chart-out",   CHART_PATH,
-    "--api-key",     process.env.AV_API_KEY || "",
+    "--api-key",     process.env.POLYGON_API_KEY || "",
   ];
 
   let stdout = "";

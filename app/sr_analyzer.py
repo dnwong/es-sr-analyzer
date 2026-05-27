@@ -1,9 +1,13 @@
 ﻿"""
-ES Futures Support & Resistance Analyzer - Alpha Vantage
+ES Futures Support & Resistance Analyzer
+Data source: Polygon.io (free API key at https://polygon.io)
+Futures symbols: ES, MES, NQ, MNQ, RTY, YM
 """
+
 import argparse, json, os, tempfile, socket
 from datetime import datetime, timedelta, time as dtime, timezone
 from dataclasses import dataclass, field
+
 import numpy as np
 import pandas as pd
 import requests
@@ -17,9 +21,19 @@ def _ipv4(host, port, family=0, *a, **kw):
     return _orig(host, port, socket.AF_INET, *a, **kw)
 socket.getaddrinfo = _ipv4
 
-AV_BASE = "https://www.alphavantage.co/query"
-SYMBOL_MAP = {"ES=F":"ES","MES=F":"ES","NQ=F":"NQ","MNQ=F":"NQ","RTY=F":"RTY","YM=F":"YM"}
-INTERVAL_MAP = {"1m":"1min","2m":"5min","5m":"5min","15m":"15min"}
+POLY_BASE = "https://api.polygon.io"
+
+# Polygon futures ticker format: /ES (slash prefix)
+SYMBOL_MAP = {
+    "ES=F": "/ES", "MES=F": "/MES", "ES": "/ES", "MES": "/MES",
+    "NQ=F": "/NQ", "MNQ=F": "/MNQ", "NQ": "/NQ",  "MNQ": "/MNQ",
+    "RTY=F": "/RTY", "RTY": "/RTY",
+    "YM=F": "/YM",  "YM": "/YM",
+}
+
+MULTIPLIER_MAP = {"1m":"1","2m":"2","5m":"5","15m":"15","30m":"30","60m":"60"}
+TIMESPAN_MAP   = {"1m":"minute","2m":"minute","5m":"minute","15m":"minute","30m":"minute","60m":"minute"}
+
 
 @dataclass
 class Level:
@@ -29,33 +43,55 @@ class Level:
     score: float = 0.0
     kind: str = "neutral"
 
-def fetch_data(symbol, days_back, interval, api_key):
-    av_symbol = SYMBOL_MAP.get(symbol, symbol.replace("=F",""))
-    av_interval = INTERVAL_MAP.get(interval, "5min")
-    params = {"function":"TIME_SERIES_INTRADAY","symbol":av_symbol,
-              "interval":av_interval,"outputsize":"full","datatype":"json","apikey":api_key}
-    resp = requests.get(AV_BASE, params=params, timeout=30)
-    resp.raise_for_status()
+
+def fetch_data(symbol: str, days_back: int, interval: str, api_key: str) -> pd.DataFrame:
+    ticker     = SYMBOL_MAP.get(symbol, f"/{symbol}")
+    multiplier = MULTIPLIER_MAP.get(interval, "5")
+    timespan   = TIMESPAN_MAP.get(interval, "minute")
+
+    end_dt   = datetime.now()
+    start_dt = end_dt - timedelta(days=days_back + 2)
+    from_str = start_dt.strftime("%Y-%m-%d")
+    to_str   = end_dt.strftime("%Y-%m-%d")
+
+    url = f"{POLY_BASE}/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}/{from_str}/{to_str}"
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
+
+    resp = requests.get(url, params=params, timeout=30)
     data = resp.json()
-    if "Error Message" in data: raise ValueError(f"AV error: {data['Error Message']}")
-    if "Note" in data: raise ValueError("AV rate limit. Wait 1 minute.")
-    if "Information" in data: raise ValueError(f"AV: {data['Information']}")
-    key = f"Time Series ({av_interval})"
-    if key not in data: raise ValueError(f"No data for {av_symbol}.")
-    rows = [{"Datetime":pd.to_datetime(dt),"Open":float(v["1. open"]),"High":float(v["2. high"]),
-             "Low":float(v["3. low"]),"Close":float(v["4. close"]),"Volume":float(v["5. volume"])}
-            for dt,v in data[key].items()]
+
+    if resp.status_code == 403:
+        raise ValueError("Polygon API key invalid or unauthorized.")
+    if resp.status_code != 200:
+        raise ValueError(f"Polygon error {resp.status_code}: {data.get('error', data.get('message','unknown'))}")
+    if data.get("status") == "ERROR":
+        raise ValueError(f"Polygon: {data.get('error', data.get('message','unknown'))}")
+    if not data.get("results"):
+        raise ValueError(f"No data returned for {ticker}. Check symbol and ensure market was open in the last {days_back} days.")
+
+    rows = [
+        {
+            "Datetime": pd.to_datetime(r["t"], unit="ms", utc=True).tz_convert("America/New_York"),
+            "Open":   r["o"], "High":  r["h"],
+            "Low":    r["l"], "Close": r["c"],
+            "Volume": r.get("v", 0),
+        }
+        for r in data["results"]
+    ]
     df = pd.DataFrame(rows).set_index("Datetime").sort_index()
-    df = df[df.index >= datetime.now() - timedelta(days=days_back)]
-    if df.empty: raise ValueError(f"No data in last {days_back} days for {av_symbol}.")
-    df.index = pd.DatetimeIndex(df.index).tz_localize("America/New_York", ambiguous="infer", nonexistent="shift_forward")
+    cutoff = pd.Timestamp(datetime.now(timezone.utc) - timedelta(days=days_back)).tz_convert("America/New_York")
+    df = df[df.index >= cutoff]
+    if df.empty:
+        raise ValueError(f"No data in last {days_back} days for {ticker}.")
     return df
+
 
 def prior_day_levels(df):
     daily = df.resample("D").agg({"Open":"first","High":"max","Low":"min","Close":"last","Volume":"sum"}).dropna()
     if len(daily) < 2: return {}
     p = daily.iloc[-2]
     return {"PDH":float(p["High"]),"PDL":float(p["Low"]),"PDC":float(p["Close"])}
+
 
 def opening_range(df, minutes=30):
     today = df.index[-1].date()
@@ -65,26 +101,30 @@ def opening_range(df, minutes=30):
     return {"ORH":float(bars["High"].max()),"ORL":float(bars["Low"].min()),
             "OR_MID":float((bars["High"].max()+bars["Low"].min())/2)}
 
+
 def compute_vwap(df):
     df = df.copy()
-    df["date"] = df.index.date
+    df["date"]    = df.index.date
     df["typical"] = (df["High"]+df["Low"]+df["Close"])/3
-    df["tp_vol"] = df["typical"]*df["Volume"]
-    df["cum_tp"] = df.groupby("date")["tp_vol"].cumsum()
+    df["tp_vol"]  = df["typical"]*df["Volume"]
+    df["cum_tp"]  = df.groupby("date")["tp_vol"].cumsum()
     df["cum_vol"] = df.groupby("date")["Volume"].cumsum()
-    df["VWAP"] = df["cum_tp"]/df["cum_vol"]
-    df["sq"] = (df["typical"]-df["VWAP"])**2
-    df["cum_sq"] = df.groupby("date")["sq"].cumsum()
-    df["std"] = np.sqrt(df["cum_sq"]/df.groupby("date").cumcount().add(1))
-    df["VWAP_U1"] = df["VWAP"]+df["std"]; df["VWAP_L1"] = df["VWAP"]-df["std"]
+    df["VWAP"]    = df["cum_tp"]/df["cum_vol"]
+    df["sq"]      = (df["typical"]-df["VWAP"])**2
+    df["cum_sq"]  = df.groupby("date")["sq"].cumsum()
+    df["std"]     = np.sqrt(df["cum_sq"]/df.groupby("date").cumcount().add(1))
+    df["VWAP_U1"] = df["VWAP"]+df["std"];   df["VWAP_L1"] = df["VWAP"]-df["std"]
     df["VWAP_U2"] = df["VWAP"]+2*df["std"]; df["VWAP_L2"] = df["VWAP"]-2*df["std"]
     return df
+
 
 def swing_levels(df, order=5):
     h,l,n = df["High"].values,df["Low"].values,len(df)
     sh = [i for i in range(order,n-order) if h[i]==max(h[i-order:i+order+1])]
     sl = [i for i in range(order,n-order) if l[i]==min(l[i-order:i+order+1])]
-    return {"swing_highs":sorted(set(h[sh]),reverse=True)[:8],"swing_lows":sorted(set(l[sl]))[:8]}
+    return {"swing_highs":sorted(set(h[sh]),reverse=True)[:8],
+            "swing_lows":sorted(set(l[sl]))[:8]}
+
 
 def volume_clusters(df, bins=60, top_n=5):
     pr = np.linspace(df["Low"].min(),df["High"].max(),bins+1)
@@ -96,6 +136,7 @@ def volume_clusters(df, bins=60, top_n=5):
     c = (pr[:-1]+pr[1:])/2
     return sorted([float(c[i]) for i in np.argsort(vp)[-top_n:][::-1]])
 
+
 def count_touches(price, df, tol=2.0, recent=30):
     tot,rec,n = 0,0,len(df)
     for i,(_,row) in enumerate(df.iterrows()):
@@ -104,6 +145,7 @@ def count_touches(price, df, tol=2.0, recent=30):
                 tot+=1
                 if i>=n-recent: rec+=1
     return tot,rec
+
 
 def score_levels(raw, df, hvn, tol=2.0):
     cands = {}
@@ -134,6 +176,7 @@ def score_levels(raw, df, hvn, tol=2.0):
     for lvl in levels: lvl.score=round((lvl.score/mx)*10,1)
     return sorted(levels,key=lambda l:l.score,reverse=True)
 
+
 def render_chart(df, scored, chart_out):
     today=df.index[-1].date()
     plot_df=df[df.index.date==today].copy()
@@ -159,7 +202,7 @@ def render_chart(df, scored, chart_out):
     for lvl in scored[:5]:
         c="#ef5350" if lvl.kind=="resistance" else "#26a69a"
         ax.axhline(lvl.price,color=c,linestyle="-",linewidth=2.0,alpha=0.95,
-                   label=f"* {lvl.price:.2f} score:{lvl.score}",zorder=4)
+                   label=f"* {lvl.price:.2f} score:{lvl.score} [{','.join(set(lvl.sources))}]",zorder=4)
         ax.annotate(f" {lvl.price:.2f}*",xy=(len(plot_df)-1,lvl.price),fontsize=7,color=c,
                     va="bottom" if lvl.kind=="resistance" else "top")
     vc=["#26a69a" if plot_df["Close"].iloc[i]>=plot_df["Open"].iloc[i] else "#ef5350" for i in range(len(plot_df))]
@@ -175,6 +218,7 @@ def render_chart(df, scored, chart_out):
     plt.savefig(chart_out,dpi=150,bbox_inches="tight",facecolor="#131722")
     plt.close()
 
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--symbol",      default="ES")
@@ -183,13 +227,16 @@ def main():
     p.add_argument("--or-minutes",  type=int,   default=30)
     p.add_argument("--pivot-order", type=int,   default=5)
     p.add_argument("--tolerance",   type=float, default=2.0)
-    p.add_argument("--api-key",     default=os.environ.get("AV_API_KEY",""))
+    p.add_argument("--api-key",     default=os.environ.get("POLYGON_API_KEY",""))
     p.add_argument("--json-out",    default=os.path.join(tempfile.gettempdir(),"sr_results.json"))
     p.add_argument("--chart-out",   default=os.path.join(tempfile.gettempdir(),"es_sr_analysis.png"))
     args=p.parse_args()
+
     if not args.api_key:
-        with open(args.json_out,"w") as f: json.dump({"error":"No API key. Set AV_API_KEY env var."},f)
+        with open(args.json_out,"w") as f:
+            json.dump({"error":"No API key. Set POLYGON_API_KEY env var."},f)
         return
+
     df=fetch_data(args.symbol,args.days,args.interval,args.api_key)
     df=compute_vwap(df)
     raw={}
