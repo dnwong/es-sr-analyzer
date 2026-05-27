@@ -6,6 +6,7 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
+      - AV_API_KEY=${AV_API_KEY}
     dns:
       - 8.8.8.8
       - 8.8.4.4
