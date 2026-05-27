@@ -376,19 +376,31 @@
       // Sort by price descending
       const sorted = [...data.levels].sort((a, b) => b.price - a.price);
 
-      // Find trade pivots: nearest resistance above and nearest support below
+      // Find the daily pivot point (PP = nearest level sourced as "PP", or closest to midpoint of range)
       const cur = data.current_price;
-      const nearestRes = sorted.find(l => l.price > cur);
-      const nearestSup = [...sorted].reverse().find(l => l.price < cur);
+      const allPrices = sorted.map(l => l.price);
+      const rangeMin = Math.min(...allPrices);
+      const rangeMax = Math.max(...allPrices);
+      const rangeMid = (rangeMin + rangeMax) / 2;
+
+      // PP is the level tagged as PP, or if not present, the level closest to range midpoint
+      let ppPrice = null;
+      const ppLevel = sorted.find(l => l.sources.includes("PP"));
+      if (ppLevel) {
+        ppPrice = ppLevel.price;
+      } else {
+        // fallback: level closest to midpoint of all levels
+        ppPrice = sorted.reduce((best, l) =>
+          Math.abs(l.price - rangeMid) < Math.abs(best - rangeMid) ? l.price : best
+        , sorted[0].price);
+      }
 
       const tbody = document.getElementById("tbody");
       tbody.innerHTML = "";
 
       for (const lvl of sorted) {
         const isTop    = lvl.top5;
-        const isPivotR = nearestRes && lvl.price === nearestRes.price;
-        const isPivotS = nearestSup && lvl.price === nearestSup.price;
-        const isPivot  = isPivotR || isPivotS;
+        const isPivot  = ppPrice !== null && lvl.price === ppPrice;
 
         const distSign  = lvl.distance > 0 ? "▲" : "▼";
         const distClass = lvl.distance > 0 ? "up" : "down";
@@ -402,13 +414,11 @@
           : "—";
         const zone = lvl.zone_low ? `${lvl.zone_low}–${lvl.zone_high}` : "—";
 
-        // Trade pivot marker
+        // Market pivot point marker
         let pivotBadge = "";
-        if (isPivotR) pivotBadge = `<span style="background:#3d1a1a;color:#ef5350;font-size:0.7rem;padding:1px 6px;border-radius:3px;margin-left:4px;font-weight:700">▲ TRADE PIVOT</span>`;
-        if (isPivotS) pivotBadge = `<span style="background:#0d2818;color:#26a69a;font-size:0.7rem;padding:1px 6px;border-radius:3px;margin-left:4px;font-weight:700">▼ TRADE PIVOT</span>`;
+        if (isPivot) pivotBadge = `<span style="background:#1a2a3a;color:#58a6ff;font-size:0.7rem;padding:1px 6px;border-radius:3px;margin-left:4px;font-weight:700;border:1px solid #58a6ff">◆ PIVOT</span>`;
 
-        // Row highlight for pivot
-        const rowStyle = isPivot ? 'style="background:#1c2128;outline:1px solid #444"' : "";
+        const rowStyle = isPivot ? 'style="background:#111d2b;outline:1px solid #58a6ff44"' : "";
 
         tbody.innerHTML += `
           <tr class="${isTop ? "top5" : ""}" ${rowStyle}>
