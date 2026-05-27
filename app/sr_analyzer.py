@@ -244,7 +244,7 @@ def render_chart(df, scored, chart_out):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--symbol",      default="ES=F")
+    parser.add_argument("--symbol",      default="MES=F")
     parser.add_argument("--interval",    default="5m")
     parser.add_argument("--days",        type=int,   default=3)
     parser.add_argument("--or-minutes",  type=int,   default=30)

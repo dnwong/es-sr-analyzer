@@ -27,7 +27,7 @@ app.get("/chart", (req, res) => {
 // Run the analyzer
 app.post("/analyze", (req, res) => {
   const {
-    symbol      = "ES=F",
+    symbol      = "MES=F",
     interval    = "5m",
     days        = "3",
     or_minutes  = "30",
