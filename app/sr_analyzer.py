@@ -34,7 +34,16 @@ def fetch_data(symbol, days_back, interval):
     df = yf.download(symbol, start=start, end=end, interval=interval,
                      progress=False, auto_adjust=True)
     if df.empty:
-        raise ValueError(f"No data returned for {symbol}.")
+        # Widen the window and retry once before giving up
+        start = end - timedelta(days=days_back + 4)
+        df = yf.download(symbol, start=start, end=end, interval=interval,
+                         progress=False, auto_adjust=True)
+    if df.empty:
+        raise ValueError(
+            f"No data returned for {symbol} [{interval}]. "
+            "Markets may be closed, or yfinance has no intraday data for this symbol. "
+            "Try MES=F, a wider day range, or a larger interval (5m or 15m)."
+        )
     df.index = pd.to_datetime(df.index)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
