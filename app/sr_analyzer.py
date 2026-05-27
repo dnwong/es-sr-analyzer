@@ -30,12 +30,18 @@ class Level:
 
 def fetch_data(symbol, days_back, interval):
     import requests
+    import socket
     from yfinance import Ticker
+
+    # Force IPv4 — IPv6 is unreachable in this Docker environment
+    orig_getaddrinfo = socket.getaddrinfo
+    def getaddrinfo_ipv4(host, port, family=0, *args, **kwargs):
+        return orig_getaddrinfo(host, port, socket.AF_INET, *args, **kwargs)
+    socket.getaddrinfo = getaddrinfo_ipv4
 
     end = datetime.now()
     start = end - timedelta(days=days_back + 4)
 
-    # Use a requests session with a browser UA to avoid Yahoo blocks
     session = requests.Session()
     session.headers.update({
         "User-Agent": (

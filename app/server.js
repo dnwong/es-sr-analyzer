@@ -25,9 +25,9 @@ app.get("/health", async (req, res) => {
 
   try { pyVersion = execSync("python3 --version 2>&1").toString().trim(); } catch(e) { diagnose.push("python3 missing"); }
   try { execSync("nslookup query2.finance.yahoo.com 8.8.8.8"); dnsOk = true; } catch { diagnose.push("DNS failed"); }
-  try { execSync("curl -sf --max-time 5 https://query2.finance.yahoo.com/v8/finance/chart/SPY"); yahooReachable = true; httpsOk = true; }
+  try { execSync("curl -sf --max-time 5 -4 https://query2.finance.yahoo.com/v8/finance/chart/SPY"); yahooReachable = true; httpsOk = true; }
   catch(e) { diagnose.push("curl yahoo failed: " + e.message); }
-  try { execSync("curl -sf --max-time 5 https://httpbin.org/get"); httpsOk = true; }
+  try { execSync("curl -sf --max-time 5 -4 https://httpbin.org/get"); httpsOk = true; }
   catch(e) { diagnose.push("curl httpbin failed: " + e.message); }
 
   res.json({ status: "ok", pyVersion, yahooReachable, dnsOk, httpsOk, diagnose });
