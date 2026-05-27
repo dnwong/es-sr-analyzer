@@ -6,7 +6,8 @@ Outputs JSON results and a chart image for the Node.js web app.
 import argparse
 import json
 import os
-from datetime import datetime, timedelta, time as dtime
+import tempfile
+from datetime import datetime, timedelta, time as dtime, timezone
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -240,8 +241,8 @@ def main():
     parser.add_argument("--or-minutes",  type=int,   default=30)
     parser.add_argument("--pivot-order", type=int,   default=5)
     parser.add_argument("--tolerance",   type=float, default=2.0)
-    parser.add_argument("--json-out",    default=None)
-    parser.add_argument("--chart-out",   default="es_sr_analysis.png")
+    parser.add_argument("--json-out",    default=os.path.join(tempfile.gettempdir(), "sr_results.json"))
+    parser.add_argument("--chart-out",   default=os.path.join(tempfile.gettempdir(), "es_sr_analysis.png"))
     args = parser.parse_args()
 
     df = fetch_data(args.symbol, args.days, args.interval)
@@ -260,7 +261,7 @@ def main():
         "symbol":        args.symbol,
         "interval":      args.interval,
         "current_price": current,
-        "generated_at":  datetime.utcnow().isoformat() + "Z",
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
         "levels": [
             {
                 "rank":    i + 1,
