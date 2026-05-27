@@ -14,7 +14,18 @@ const JSON_PATH  = path.join(os.tmpdir(), "sr_results.json");
 const PY_SCRIPT  = path.join(__dirname, "sr_analyzer.py");
 const TIMEOUT_MS = 120_000; // 2 min max for data fetch + analysis
 
-// Serve chart image
+// Health + diagnostics endpoint
+app.get("/health", async (req, res) => {
+  const { execSync } = require("child_process");
+  let pyVersion = "unknown";
+  let netOk = false;
+  try { pyVersion = execSync("python3 --version").toString().trim(); } catch {}
+  try {
+    execSync("curl -sf --max-time 5 https://query2.finance.yahoo.com/v8/finance/chart/SPY");
+    netOk = true;
+  } catch {}
+  res.json({ status: "ok", pyVersion, yahooReachable: netOk });
+});
 app.get("/chart", (req, res) => {
   if (fs.existsSync(CHART_PATH)) {
     res.setHeader("Cache-Control", "no-store");
