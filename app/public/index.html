@@ -368,20 +368,33 @@
         <div class="meta-item"><div class="val">${data.symbol}</div><div class="lbl">Symbol</div></div>
         <div class="meta-item"><div class="val">${data.current_price.toFixed(2)}</div><div class="lbl">Current Price</div></div>
         <div class="meta-item"><div class="val">${data.interval}</div><div class="lbl">Interval</div></div>
+        <div class="meta-item"><div class="val">${(data.mode||'standard').toUpperCase()}</div><div class="lbl">Mode</div></div>
         <div class="meta-item"><div class="val">${new Date(data.generated_at).toLocaleTimeString()}</div><div class="lbl">Generated</div></div>
       `;
       meta.style.display = "flex";
 
-      // Table
+      // Sort by price descending
+      const sorted = [...data.levels].sort((a, b) => b.price - a.price);
+
+      // Find trade pivots: nearest resistance above and nearest support below
+      const cur = data.current_price;
+      const nearestRes = sorted.find(l => l.price > cur);
+      const nearestSup = [...sorted].reverse().find(l => l.price < cur);
+
       const tbody = document.getElementById("tbody");
       tbody.innerHTML = "";
-      for (const lvl of data.levels) {
-        const isTop = lvl.top5;
-        const distSign = lvl.distance > 0 ? "▲" : "▼";
+
+      for (const lvl of sorted) {
+        const isTop    = lvl.top5;
+        const isPivotR = nearestRes && lvl.price === nearestRes.price;
+        const isPivotS = nearestSup && lvl.price === nearestSup.price;
+        const isPivot  = isPivotR || isPivotS;
+
+        const distSign  = lvl.distance > 0 ? "▲" : "▼";
         const distClass = lvl.distance > 0 ? "up" : "down";
-        const sources = lvl.sources.map(s => `<span class="source-tag">${s}</span>`).join("");
-        const barClass = isTop ? "bar-fill top" : "bar-fill";
-        const star = isTop ? '<span class="star">★</span>' : "";
+        const sources   = lvl.sources.map(s => `<span class="source-tag">${s}</span>`).join("");
+        const barClass  = isTop ? "bar-fill top" : "bar-fill";
+        const star      = isTop ? '<span class="star">★</span>' : "";
 
         const credColor = {"strong":"#26a69a","moderate":"#ff9800","weak":"#8b949e"};
         const credBadge = lvl.credibility
@@ -389,10 +402,18 @@
           : "—";
         const zone = lvl.zone_low ? `${lvl.zone_low}–${lvl.zone_high}` : "—";
 
+        // Trade pivot marker
+        let pivotBadge = "";
+        if (isPivotR) pivotBadge = `<span style="background:#3d1a1a;color:#ef5350;font-size:0.7rem;padding:1px 6px;border-radius:3px;margin-left:4px;font-weight:700">▲ TRADE PIVOT</span>`;
+        if (isPivotS) pivotBadge = `<span style="background:#0d2818;color:#26a69a;font-size:0.7rem;padding:1px 6px;border-radius:3px;margin-left:4px;font-weight:700">▼ TRADE PIVOT</span>`;
+
+        // Row highlight for pivot
+        const rowStyle = isPivot ? 'style="background:#1c2128;outline:1px solid #444"' : "";
+
         tbody.innerHTML += `
-          <tr class="${isTop ? "top5" : ""}">
+          <tr class="${isTop ? "top5" : ""}" ${rowStyle}>
             <td>${star}${lvl.rank}</td>
-            <td><strong>${lvl.price.toFixed(2)}</strong></td>
+            <td><strong>${lvl.price.toFixed(2)}</strong>${pivotBadge}</td>
             <td style="font-size:0.75rem;color:#8b949e">${zone}</td>
             <td><span class="badge ${lvl.kind}">${lvl.kind}</span></td>
             <td>
