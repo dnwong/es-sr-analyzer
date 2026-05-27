@@ -29,22 +29,35 @@ class Level:
 
 
 def fetch_data(symbol, days_back, interval):
+    import requests
+    from yfinance import Ticker
+
     end = datetime.now()
-    start = end - timedelta(days=days_back)
-    df = yf.download(symbol, start=start, end=end, interval=interval,
-                     progress=False, auto_adjust=True)
-    if df.empty:
-        # Widen the window and retry once before giving up
-        start = end - timedelta(days=days_back + 4)
-        df = yf.download(symbol, start=start, end=end, interval=interval,
-                         progress=False, auto_adjust=True)
+    start = end - timedelta(days=days_back + 4)
+
+    # Use a requests session with a browser UA to avoid Yahoo blocks
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+    })
+
+    ticker = Ticker(symbol, session=session)
+    df = ticker.history(start=start, end=end, interval=interval, auto_adjust=True)
+
     if df.empty:
         raise ValueError(
             f"No data returned for {symbol} [{interval}]. "
-            "Markets may be closed, or yfinance has no intraday data for this symbol. "
-            "Try MES=F, a wider day range, or a larger interval (5m or 15m)."
+            "Markets may be closed or Yahoo Finance is blocking the request. "
+            "Try SPY, QQQ, or check back during market hours (Mon-Fri 9:30am-4pm ET)."
         )
+
     df.index = pd.to_datetime(df.index)
+    if df.index.tz is not None:
+        df.index = df.index.tz_convert("America/New_York")
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
