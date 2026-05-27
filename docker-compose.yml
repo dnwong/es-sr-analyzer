@@ -3,7 +3,9 @@ services:
     # Pre-built image from GitHub Container Registry (auto-built on every push to master)
     # Falls back to building from local Dockerfile if the image can't be pulled
     image: ghcr.io/dnwong/es-sr-analyzer:latest
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
 
     container_name: es-sr-analyzer
 
