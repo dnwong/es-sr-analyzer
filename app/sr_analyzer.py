@@ -280,9 +280,9 @@ def build_chart_json(df, scored, mode, pp, symbol, interval):
     lows   = [float(x) for x in plot_df["Low"].tolist()]
     closes = [float(x) for x in plot_df["Close"].tolist()]
     vols   = [float(x) for x in plot_df["Volume"].tolist()]
-    vwap   = [float(x) for x in plot_df["VWAP"].tolist()]
-    vwap_u1= [float(x) for x in plot_df["VWAP_U1"].tolist()]
-    vwap_l1= [float(x) for x in plot_df["VWAP_L1"].tolist()]
+    vwap   = [None if np.isnan(x) else float(x) for x in plot_df["VWAP"].tolist()]
+    vwap_u1= [None if np.isnan(x) else float(x) for x in plot_df["VWAP_U1"].tolist()]
+    vwap_l1= [None if np.isnan(x) else float(x) for x in plot_df["VWAP_L1"].tolist()]
 
     traces = []
 
@@ -484,12 +484,11 @@ def main():
     }
 
     with open(args.json_out, "w") as f:
-        json.dump(results, f, cls=NumpyEncoder)
+        json.dump(results, f, cls=NumpyEncoder, allow_nan=False)
 
-    # Build interactive Plotly chart JSON
     chart = build_chart_json(df, scored, args.mode, pp, args.symbol, args.interval)
     with open(args.chart_out, "w") as f:
-        json.dump(chart, f, cls=NumpyEncoder)
+        json.dump(chart, f, cls=NumpyEncoder, allow_nan=False)
 
     print(f"Done. Results: {args.json_out}  Chart: {args.chart_out}")
 
