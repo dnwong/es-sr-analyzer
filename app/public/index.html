@@ -443,14 +443,12 @@
 
       // Chart — fetch Plotly JSON and render interactively
       fetch("/chart?" + Date.now())
-        .then(r => {
-          if (!r.ok) throw new Error("Chart fetch failed: " + r.status);
-          return r.json();
-        })
-        .then(fig => {
-          if (!fig.data || !fig.layout) throw new Error("Invalid chart data");
+        .then(r => r.json().then(body => ({ ok: r.ok, status: r.status, body })))
+        .then(({ ok, status, body }) => {
+          if (!ok) throw new Error(body.error || "HTTP " + status);
+          if (!body.data || !body.layout) throw new Error("Invalid chart structure");
           document.getElementById("chart-wrap").style.display = "block";
-          Plotly.newPlot("plotly-chart", fig.data, fig.layout, {
+          Plotly.newPlot("plotly-chart", body.data, body.layout, {
             responsive: true,
             scrollZoom: true,
             displayModeBar: true,

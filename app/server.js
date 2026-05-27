@@ -35,11 +35,13 @@ app.get("/health", async (req, res) => {
 app.get("/chart", (req, res) => {
   if (fs.existsSync(CHART_PATH)) {
     try {
-      const chartData = JSON.parse(fs.readFileSync(CHART_PATH, "utf8"));
+      const raw = fs.readFileSync(CHART_PATH, "utf8");
+      const chartData = JSON.parse(raw);
       res.setHeader("Cache-Control", "no-store");
       res.json(chartData);
     } catch(e) {
-      res.status(500).json({ error: "Chart data corrupted: " + e.message });
+      console.error("Chart parse error:", e.message);
+      res.status(500).json({ error: "Chart parse error: " + e.message });
     }
   } else {
     res.status(404).json({ error: "No chart generated yet" });
