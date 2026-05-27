@@ -9,7 +9,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const os = require("os");
-const CHART_PATH = path.join(os.tmpdir(), "es_sr_analysis.png");
+const CHART_PATH = path.join(os.tmpdir(), "sr_chart.json");
 const JSON_PATH  = path.join(os.tmpdir(), "sr_results.json");
 const PY_SCRIPT  = path.join(__dirname, "sr_analyzer.py");
 const TIMEOUT_MS = 120_000; // 2 min max for data fetch + analysis
@@ -35,6 +35,7 @@ app.get("/health", async (req, res) => {
 app.get("/chart", (req, res) => {
   if (fs.existsSync(CHART_PATH)) {
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/json");
     res.sendFile(CHART_PATH);
   } else {
     res.status(404).json({ error: "No chart generated yet" });

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ES Futures S/R Analyzer</title>
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -316,7 +317,7 @@
       </div>
 
       <div id="chart-wrap" class="chart-wrap" style="display:none">
-        <img id="chart-img" src="" alt="S/R Chart" />
+        <div id="plotly-chart" style="width:100%;height:600px;"></div>
       </div>
     </div>
   </div>
@@ -440,10 +441,19 @@
       }
       document.getElementById("table-wrap").style.display = "block";
 
-      // Chart — cache-bust with timestamp
-      const img = document.getElementById("chart-img");
-      img.src = "/chart?" + Date.now();
-      img.onload = () => { document.getElementById("chart-wrap").style.display = "block"; };
+      // Chart — fetch Plotly JSON and render interactively
+      fetch("/chart?" + Date.now())
+        .then(r => r.json())
+        .then(fig => {
+          document.getElementById("chart-wrap").style.display = "block";
+          Plotly.newPlot("plotly-chart", fig.data, fig.layout, {
+            responsive: true,
+            scrollZoom: true,
+            displayModeBar: true,
+            modeBarButtonsToRemove: ["lasso2d","select2d"],
+          });
+        })
+        .catch(() => {});
     }
   </script>
 </body>
