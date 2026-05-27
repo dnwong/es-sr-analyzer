@@ -240,7 +240,6 @@ def main():
     parser.add_argument("--or-minutes",  type=int,   default=30)
     parser.add_argument("--pivot-order", type=int,   default=5)
     parser.add_argument("--tolerance",   type=float, default=2.0)
-    parser.add_argument("--no-chart",    action="store_true")
     parser.add_argument("--json-out",    default=None)
     parser.add_argument("--chart-out",   default="es_sr_analysis.png")
     args = parser.parse_args()
@@ -280,11 +279,12 @@ def main():
     if args.json_out:
         with open(args.json_out, "w") as f:
             json.dump(results, f)
+        print(f"Results written to {args.json_out}")
     else:
         print(json.dumps(results, indent=2))
 
-    if not args.no_chart:
-        render_chart(df, scored, args.chart_out)
+    render_chart(df, scored, args.chart_out)
+    print(f"Chart written to {args.chart_out}")
 
 
 if __name__ == "__main__":
