@@ -3,9 +3,9 @@ services:
     image: ghcr.io/dnwong/es-sr-analyzer:latest
     container_name: es-sr-analyzer
     ports:
-      - "3000:3000"
+      - "3005:3005"
     environment:
-      - PORT=3000
+      - PORT=3005
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -13,7 +13,7 @@ services:
       - net.ipv6.conf.all.disable_ipv6=1
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      test: ["CMD", "curl", "-f", "http://localhost:3005"]
       interval: 30s
       timeout: 10s
       retries: 3
