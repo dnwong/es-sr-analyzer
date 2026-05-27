@@ -443,8 +443,12 @@
 
       // Chart — fetch Plotly JSON and render interactively
       fetch("/chart?" + Date.now())
-        .then(r => r.json())
+        .then(r => {
+          if (!r.ok) throw new Error("Chart fetch failed: " + r.status);
+          return r.json();
+        })
         .then(fig => {
+          if (!fig.data || !fig.layout) throw new Error("Invalid chart data");
           document.getElementById("chart-wrap").style.display = "block";
           Plotly.newPlot("plotly-chart", fig.data, fig.layout, {
             responsive: true,
@@ -453,7 +457,11 @@
             modeBarButtonsToRemove: ["lasso2d","select2d"],
           });
         })
-        .catch(() => {});
+        .catch(err => {
+          document.getElementById("chart-wrap").style.display = "block";
+          document.getElementById("plotly-chart").innerHTML =
+            `<div style="color:#f85149;padding:20px;font-size:0.85rem">Chart error: ${err.message}</div>`;
+        });
     }
   </script>
 </body>
