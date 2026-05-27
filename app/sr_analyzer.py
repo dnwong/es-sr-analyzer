@@ -58,16 +58,33 @@ def fetch_data(symbol: str, days_back: int, interval: str, api_key: str) -> pd.D
     params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
 
     resp = requests.get(url, params=params, timeout=30)
-    data = resp.json()
+
+    # Log raw response for debugging
+    raw = resp.text[:500]
+    print(f"[DEBUG] status={resp.status_code} url={url}", flush=True)
+    print(f"[DEBUG] raw={raw}", flush=True)
 
     if resp.status_code == 403:
         raise ValueError("Polygon API key invalid or unauthorized.")
-    if resp.status_code != 200:
-        raise ValueError(f"Polygon error {resp.status_code}: {data.get('error', data.get('message','unknown'))}")
+    if resp.status_code == 429:
+        raise ValueError("Polygon rate limit reached. Wait and retry.")
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise ValueError(f"Polygon returned non-JSON response (status {resp.status_code}): {raw}")
+
     if data.get("status") == "ERROR":
-        raise ValueError(f"Polygon: {data.get('error', data.get('message','unknown'))}")
+        raise ValueError(f"Polygon error: {data.get('error', data.get('message', str(data)))}")
+    if data.get("status") == "DELAYED" or data.get("status") == "OK":
+        pass  # valid
     if not data.get("results"):
-        raise ValueError(f"No data returned for {ticker}. Check symbol and ensure market was open in the last {days_back} days.")
+        raise ValueError(
+            f"No results for {ticker} [{from_str} to {to_str}]. "
+            f"Status: {data.get('status')} | "
+            f"Count: {data.get('resultsCount', 0)} | "
+            "Check symbol, date range, and that market was open."
+        )
 
     rows = [
         {
@@ -257,3 +274,4 @@ def main():
 
 if __name__=="__main__":
     main()
+
