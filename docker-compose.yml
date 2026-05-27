@@ -1,23 +1,18 @@
 services:
   analyzer:
-    # Pre-built image from GitHub Container Registry (auto-built on every push to master)
     image: ghcr.io/dnwong/es-sr-analyzer:latest
-
     container_name: es-sr-analyzer
-
     ports:
       - "3000:3000"
-
     environment:
-      # Internal container port — must match the right side of the ports mapping above
       - PORT=3000
-
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     restart: unless-stopped
-
     healthcheck:
-      # Healthcheck runs inside the container, so uses the internal port 3000
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 30s      # check every 30s
-      timeout: 10s       # fail if no response within 10s
-      retries: 3         # mark unhealthy after 3 consecutive failures
-      start_period: 15s  # grace period on first start (Python deps take a moment)
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
