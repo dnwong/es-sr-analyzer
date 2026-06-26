@@ -428,7 +428,7 @@ def main():
     p.add_argument("--or-minutes",  type=int,   default=30)
     p.add_argument("--pivot-order", type=int,   default=5)
     p.add_argument("--tolerance",   type=float, default=2.0)
-    p.add_argument("--mode",        default="standard", choices=["standard","floor"])
+    p.add_argument("--mode",        default="floor", choices=["standard","floor"])
     p.add_argument("--api-key",     default="")
     p.add_argument("--json-out",    default=os.path.join(tempfile.gettempdir(),"sr_results.json"))
     p.add_argument("--chart-out",   default=os.path.join(tempfile.gettempdir(),"sr_chart.json"))
